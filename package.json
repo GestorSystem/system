@@ -1,0 +1,70 @@
+{
+  "name": "@gestor/system",
+  "version": "1.0.0",
+  "description": "Módulo de sistema com funcionalidades core",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "db:create": "node scripts/db-create.js",
+    "db:drop": "node scripts/db-drop.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:migrate:undo": "sequelize db:migrate:undo",
+    "db:migrate:undo:all": "sequelize db:migrate:undo:all",
+    "db:seed": "node scripts/seed.js",
+    "db:seed:undo": "sequelize db:seed:undo",
+    "db:seed:undo:all": "sequelize db:seed:undo:all",
+    "db:recreate": "sequelize db:drop && sequelize db:create && node scripts/migrate.js && node scripts/seed.js"
+  },
+  "keywords": [
+    "gestor",
+    "system",
+    "module",
+    "core"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pereirajair/core-module-system.git"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "express-openapi-validator": "^5.6.0",
+    "jsonwebtoken": "^9.0.2",
+    "md5": "^2.3.0",
+    "mysql2": "^3.15.3",
+    "pg": "^8.16.3",
+    "sequelize": "^6.37.7",
+    "sqlite3": "^5.1.7",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^13.0.0",
+    "yamljs": "^0.3.0",
+    "node-cron": "^3.0.3",
+    "@monaco-editor/loader": "^1.7.0",
+    "@quasar/extras": "^1.16.4",
+    "axios": "^1.13.2",
+    "jwt-decode": "^4.0.0",
+    "mermaid": "^11.12.2",
+    "pinia": "^3.0.4",
+    "quasar": "^2.16.0",
+    "three": "^0.182.0",
+    "vue": "^3.5.22",
+    "vue-router": "^4.0.0",
+    "vuedraggable": "^4.1.0"
+  },
+  "gestor": {
+    "module": true,
+    "name": "system",
+    "title": "Sistema",
+    "description": "Módulo de sistema com funcionalidades core",
+    "version": "1.0.0",
+    "enabled": true,
+    "dependencies": [],
+    "isSystem": true
+  }
+}
+
