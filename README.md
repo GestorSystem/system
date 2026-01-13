@@ -430,4 +430,4 @@ exports.myFunction = async (req, res) => {
 
 ## Licença
 
-ISC
+MIT
