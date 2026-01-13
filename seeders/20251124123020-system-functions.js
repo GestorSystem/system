@@ -3,7 +3,7 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up (queryInterface, Sequelize) {
-    // Associar todas as funções ao sistema MyChat (id: 1)
+    // Associar todas as funções ao sistema (id: 1)
     const functionIds = Array.from({ length: 30 }, (_, i) => i + 1);
     const systemFunctions = functionIds.map(id_function => ({
       id_system: 1,

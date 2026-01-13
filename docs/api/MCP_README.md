@@ -38,7 +38,7 @@ Inicializa a conexão com o servidor MCP.
       "tools": {}
     },
     "serverInfo": {
-      "name": "mychat-mcp-server",
+      "name": "gestor-mcp-server",
       "version": "1.0.0"
     }
   },

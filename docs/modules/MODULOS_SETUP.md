@@ -7,7 +7,7 @@ Os módulos estão organizados em `mod/` na raiz do projeto e configurados como 
 ## 📦 Estrutura dos Módulos
 
 Cada módulo agora tem:
-- `package.json` - Configuração do pacote npm com campo `mychat`
+- `package.json` - Configuração do pacote npm com campo `gestor`
 - `index.js` - Exporta informações do módulo
 - `.gitignore` - Arquivos ignorados pelo git
 - `README.md` - Documentação do módulo
@@ -19,7 +19,7 @@ Cada módulo agora tem:
 
 ```bash
 # No diretório raiz do projeto
-cd /Users/pereirajair/Sites/mychat
+cd ~/gestor
 
 # Instalar módulos no frontend
 cd frontend
@@ -32,8 +32,8 @@ npm install file:../mod/system --save
 
 ```bash
 cd frontend
-npm install file:///Users/pereirajair/Sites/mychat/mod/locations --save
-npm install file:///Users/pereirajair/Sites/mychat/mod/pessoa --save
+npm install file://~/gestor/mod/locations --save
+npm install file://~/gestor/mod/pessoa --save
 ```
 
 ### Opção 3: Instalar de repositório git remoto (futuro)
@@ -42,8 +42,8 @@ Quando você criar repositórios remotos:
 
 ```bash
 cd frontend
-npm install git+https://github.com/seu-usuario/mychat-locations.git --save
-npm install git+https://github.com/seu-usuario/mychat-pessoa.git --save
+npm install git+https://github.com/seu-usuario/gestor-locations.git --save
+npm install git+https://github.com/seu-usuario/gestor-pessoa.git --save
 ```
 
 ## 🔄 Como Funciona
@@ -55,8 +55,8 @@ npm install git+https://github.com/seu-usuario/mychat-pessoa.git --save
 2. Módulos npm têm prioridade sobre módulos locais
 
 3. As dependências são normalizadas automaticamente:
-   - `@mychat/pessoa` → `pessoa`
-   - `@mychat/locations` → `locations`
+   - `@gestor/pessoa` → `pessoa`
+   - `@gestor/locations` → `locations`
 
 ## 📝 Próximos Passos
 
@@ -70,7 +70,7 @@ npm install git+https://github.com/seu-usuario/mychat-pessoa.git --save
 
 2. **Verificar instalação:**
    ```bash
-   ls -la node_modules/@mychat/
+   ls -la node_modules/@gestor/
    ```
 
 3. **Testar o sistema:**
@@ -80,12 +80,12 @@ npm install git+https://github.com/seu-usuario/mychat-pessoa.git --save
 4. **Criar repositórios remotos (opcional):**
    ```bash
    # No GitHub/GitLab, criar repositórios:
-   # - mychat-pessoa
-   # - mychat-locations
+   # - gestor-pessoa
+   # - gestor-locations
    
    # Depois adicionar remotes:
    cd modules/pessoa
-   git remote add origin https://github.com/seu-usuario/mychat-pessoa.git
+   git remote add origin https://github.com/seu-usuario/gestor-pessoa.git
    git push -u origin main
    ```
 

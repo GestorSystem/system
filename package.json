@@ -25,7 +25,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pereirajair/core-module-system.git"
+    "url": "https://github.com/GestorSystem/system.git"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

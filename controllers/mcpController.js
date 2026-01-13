@@ -546,7 +546,7 @@ async function handleMCP(req, res) {
               tools: {}
             },
             serverInfo: {
-              name: 'mychat-mcp-server',
+              name: 'gestorsys-mcp-server',
               version: '1.0.0'
             }
           },
