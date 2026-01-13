@@ -1,14 +1,18 @@
 const path = require('path');
 const fs = require('fs');
 
-// Tentar carregar .env do diretório frontend (onde está o projeto principal)
+// Tentar carregar .env do diretório frontend/gestor (onde está o projeto principal)
 // O módulo pode estar em mod/system ou node_modules/@gestor/system
 const possibleEnvPaths = [
+  path.resolve(__dirname, '../../.env'), // node_modules/@gestor/system/config -> gestor/.env
+  path.resolve(__dirname, '../../../.env'), // node_modules/@gestor/system/config -> gestor/.env (alternativo)
   path.resolve(__dirname, '../../.env'), // node_modules/@gestor/system/config -> frontend/.env
   path.resolve(__dirname, '../../../.env'), // node_modules/@gestor/system/config -> frontend/.env (alternativo)
-  path.resolve(__dirname, '../.env'), // mod/system/config -> frontend/.env
+  path.resolve(__dirname, '../../.env'), // node_modules/@gestor/system/config -> raiz/.env
+  path.resolve(__dirname, '../../../.env'), // node_modules/@gestor/system/config -> raiz/.env (alternativo)
+  path.resolve(__dirname, '../.env'), // modules/system/config -> gestor/.env
   path.resolve(__dirname, '../.env'), // mod/system/.env ou node_modules/@gestor/system/.env
-  path.resolve(__dirname, '../../.env'), // raiz do projeto
+  path.resolve(__dirname, '../../../../.env'), // raiz do projeto
 ];
 
 let envPath = null;
@@ -45,7 +49,7 @@ const baseConfig = {
     database: process.env.DB_DATABASE,
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
-    dialect: process.env.DB_CONNECTION,
+    dialect: process.env.DB_CONNECTION || 'mysql',
   migrationStorage: 'sequelize',
   migrationStorageTableName: 'SequelizeMeta',
   seederStorage: 'sequelize',
