@@ -287,9 +287,20 @@ async function handleDynamicCrud(req, res, next) {
           if (association && association.associationType === 'BelongsTo') {
             const targetModel = association.target;
             if (targetModel) {
+              // Usar o alias da associação se disponível
+              // O Sequelize armazena o alias em association.as, mas a chave do objeto pode ser diferente
+              // Se a chave termina com _id, provavelmente é o foreignKey, então usar o alias da associação
+              let alias = assocName;
+              if (association.as) {
+                alias = association.as;
+              } else if (assocName.endsWith('_id')) {
+                // Se a chave é o foreignKey (ex: organization_id), usar o nome do modelo como alias
+                alias = targetModel.name;
+              }
+              
               includes.push({
                 model: targetModel,
-                as: assocName,
+                as: alias,
                 required: false
               });
             }

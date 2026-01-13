@@ -100,7 +100,12 @@ function loadModels() {
   return db;
 }
 
+function clearCache() {
+  dbInstance = null;
+}
+
 module.exports = {
-  loadModels
+  loadModels,
+  clearCache
 };
 

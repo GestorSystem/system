@@ -37,6 +37,15 @@ async function reloadModels() {
       delete require.cache[modelsLoaderPath];
     }
     
+    // Limpar cache interno do modelsLoader
+    const modelsLoader = require('./modelsLoader');
+    if (modelsLoader.clearCache) {
+      modelsLoader.clearCache();
+    }
+    
+    // Obter nova instância do db (sem cache)
+    const freshDb = modelsLoader.loadModels();
+    
     // Carregar módulos usando moduleLoader
     const { loadModules } = require('./moduleLoader');
     const modules = loadModules();
@@ -63,7 +72,7 @@ async function reloadModels() {
         // Listar arquivos de model no diretório do módulo
         const files = fs.readdirSync(modelsPath)
           .filter(file => file.indexOf('.') !== 0 && file !== 'index.js' && file.slice(-3) === '.js');
-        
+          
         console.log(`📁 Recarregando ${files.length} model(s) do módulo ${module.name}...`);
         
         // Limpar cache do require para os arquivos de model
@@ -82,10 +91,14 @@ async function reloadModels() {
         files.forEach(file => {
           try {
             const filePath = path.join(modelsPath, file);
-            const model = require(filePath)(db.sequelize, db.Sequelize.DataTypes);
+            const model = require(filePath)(freshDb.sequelize, freshDb.Sequelize.DataTypes);
             // Atualizar ou adicionar model no objeto db
             const modelName = model.name || model.constructor.name || file.replace('.js', '');
-            db[modelName] = model;
+            freshDb[modelName] = model;
+            // Também registrar com o nome do arquivo (sem extensão) para compatibilidade
+            if (modelName !== file.replace('.js', '')) {
+              freshDb[file.replace('.js', '')] = model;
+            }
             totalModelsReloaded++;
           } catch (error) {
             console.error(`❌ Erro ao recarregar model ${file} do módulo ${module.name}:`, error.message);
@@ -98,15 +111,19 @@ async function reloadModels() {
     
     // Reassociar models
     console.log('🔄 Reassociando models...');
-    Object.keys(db).forEach(modelName => {
-      if (db[modelName] && typeof db[modelName].associate === 'function') {
+    Object.keys(freshDb).forEach(modelName => {
+      if (freshDb[modelName] && typeof freshDb[modelName].associate === 'function') {
         try {
-          db[modelName].associate(db);
+          freshDb[modelName].associate(freshDb);
         } catch (error) {
           console.error(`❌ Erro ao reassociar model ${modelName}:`, error.message);
         }
       }
     });
+    
+    // Atualizar referência global do db
+    Object.keys(db).forEach(key => delete db[key]);
+    Object.assign(db, freshDb);
     
     console.log(`✅ ${totalModelsReloaded} model(s) recarregado(s) com sucesso de ${modules.filter(m => m.enabled).length} módulo(s)!`);
     return { success: true, message: `${totalModelsReloaded} models recarregados com sucesso` };

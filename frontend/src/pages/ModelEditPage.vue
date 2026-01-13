@@ -100,6 +100,25 @@
                     <template v-slot:prepend>
                       <q-icon name="folder" />
                     </template>
+                    <template v-slot:option="scope">
+                      <q-item 
+                        v-bind="scope.itemProps"
+                        :disable="scope.opt.installed === false"
+                      >
+                        <q-item-section avatar>
+                          <q-icon :name="scope.opt.installed === false ? 'warning' : 'folder'" 
+                                  :color="scope.opt.installed === false ? 'warning' : 'primary'" />
+                        </q-item-section>
+                        <q-item-section>
+                          <q-item-label :class="scope.opt.installed === false ? 'text-grey-6' : ''">
+                            {{ scope.opt.title }}
+                          </q-item-label>
+                          <q-item-label v-if="scope.opt.installed === false" caption class="text-warning">
+                            Não instalado (inativo)
+                          </q-item-label>
+                        </q-item-section>
+                      </q-item>
+                    </template>
                   </q-select>
                   <q-input
                     v-model="modelData.name"
@@ -866,12 +885,20 @@ async function loadAvailableModules() {
     const modules = response.data || [];
     // Adicionar opção "Nenhum" para models sem módulo (pasta padrão)
     availableModules.value = [
-      { name: null, title: 'Nenhum (Pasta Padrão)', isSystem: false },
-      ...modules
+      { name: null, title: 'Nenhum (Pasta Padrão)', isSystem: false, installed: true },
+      ...modules.map(m => ({
+        ...m,
+        // Se installed não estiver definido, assumir true (compatibilidade)
+        installed: m.installed !== undefined ? m.installed : true
+      }))
     ];
-    // Se for nova model e não houver módulo selecionado, selecionar o primeiro não-sistema
+    // Se for nova model e não houver módulo selecionado, selecionar o primeiro não-sistema instalado
     if (isNew.value && !selectedModule.value && availableModules.value.length > 0) {
-      const nonSystemModule = availableModules.value.find(m => !m.isSystem && m.name !== null);
+      const nonSystemModule = availableModules.value.find(m => 
+        !m.isSystem && 
+        m.name !== null && 
+        m.installed !== false // Preferir módulos instalados
+      );
       if (nonSystemModule) {
         selectedModule.value = nonSystemModule.name;
       }

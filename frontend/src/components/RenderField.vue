@@ -191,16 +191,20 @@
       >
         <template v-slot:prepend>
           <div
-            class="color-preview"
-            :style="{ backgroundColor: formData[field.name] || '#cccccc' }"
-            @click="openColorPicker(field.name)"
+            class="color-preview-wrapper"
+            @click.stop="openColorPicker(field.name)"
           >
-            <q-icon
-              v-if="!formData[field.name]"
-              name="palette"
-              size="xs"
-              color="grey-6"
-            />
+            <div
+              class="color-preview"
+              :style="{ backgroundColor: formData[field.name] || '#cccccc' }"
+            >
+              <q-icon
+                v-if="!formData[field.name]"
+                name="palette"
+                size="xs"
+                color="grey-6"
+              />
+            </div>
           </div>
         </template>
         <template v-slot:append>
@@ -209,21 +213,24 @@
             dense
             round
             icon="colorize"
-            @click="openColorPicker(field.name)"
+            @click.stop="openColorPicker(field.name)"
           >
             <q-tooltip>Selecionar cor</q-tooltip>
           </q-btn>
         </template>
       </q-input>
+      <!-- Input de cor escondido mas acessível -->
       <input
         :ref="(el) => { 
           if (el && field.name) { 
-            colorInputRefs.value[field.name] = el; 
-          } 
+            colorInputRefs[field.name] = el;
+          } else if (!el && field.name) {
+            delete colorInputRefs[field.name];
+          }
         }"
         type="color"
-        :value="formData[field.name] || '#000000'"
-        @input="updateValue($event.target.value)"
+        :value="normalizeColorValue(formData[field.name])"
+        @input="(e) => updateValue(e.target.value)"
         class="color-input-hidden"
         tabindex="-1"
       />
@@ -263,7 +270,7 @@
 </template>
 
 <script setup>
-import { ref as vueRef } from 'vue';
+import { ref, reactive } from 'vue';
 import TransferList from './TransferList.vue';
 import RelationMultiSelect from './RelationMultiSelect.vue';
 import RelationInlineForm from './RelationInlineForm.vue';
@@ -302,13 +309,106 @@ const props = defineProps({
 const emit = defineEmits(['file-upload', 'update:modelValue']);
 
 // Objeto reativo para armazenar referências dos inputs de cor (um por campo)
-const colorInputRefs = vueRef({});
+// Usar reactive ao invés de ref para evitar problemas de estrutura aninhada
+const colorInputRefs = reactive({});
+
+// Função para normalizar o valor da cor removendo o canal alpha
+// O input type="color" só aceita formato #rrggbb, não aceita #rrggbbaa
+function normalizeColorValue(colorValue) {
+  if (!colorValue || typeof colorValue !== 'string') {
+    return '#000000';
+  }
+  
+  // Se o valor tem 9 caracteres (incluindo #), significa que tem alpha (#rrggbbaa)
+  // Remover os últimos 2 caracteres (o alpha)
+  if (colorValue.length === 9 && colorValue.startsWith('#')) {
+    return colorValue.substring(0, 7); // Retorna #rrggbb
+  }
+  
+  // Se já está no formato correto (#rrggbb) ou é inválido, retorna como está ou padrão
+  if (colorValue.length === 7 && colorValue.startsWith('#')) {
+    return colorValue;
+  }
+  
+  // Se não está no formato esperado, retorna padrão
+  return '#000000';
+}
 
 // Função para abrir o color picker
 function openColorPicker(fieldName) {
-  const colorInput = colorInputRefs.value[fieldName];
-  if (colorInput && colorInput.click) {
-    colorInput.click();
+  console.log('[openColorPicker] Tentando abrir color picker para:', fieldName);
+  console.log('[openColorPicker] colorInputRefs:', colorInputRefs);
+  
+  const colorInput = colorInputRefs[fieldName];
+  console.log('[openColorPicker] colorInput encontrado:', colorInput);
+  
+  if (!colorInput) {
+    console.warn('[openColorPicker] colorInput não encontrado para:', fieldName);
+    console.warn('[openColorPicker] Campos disponíveis:', Object.keys(colorInputRefs));
+    return;
+  }
+  
+  try {
+    // Tentar showPicker() primeiro (método moderno HTML5)
+    if (typeof colorInput.showPicker === 'function') {
+      colorInput.showPicker();
+      console.log('[openColorPicker] showPicker() chamado com sucesso');
+      return;
+    }
+    
+    // Fallback: tornar o input temporariamente visível e clicar
+    console.log('[openColorPicker] showPicker() não disponível, usando fallback');
+    
+    // Salvar estilos originais
+    const originalDisplay = colorInput.style.display;
+    const originalPosition = colorInput.style.position;
+    const originalOpacity = colorInput.style.opacity;
+    const originalWidth = colorInput.style.width;
+    const originalHeight = colorInput.style.height;
+    const originalZIndex = colorInput.style.zIndex;
+    
+    // Tornar o input visível e posicionado
+    colorInput.style.display = 'block';
+    colorInput.style.position = 'fixed';
+    colorInput.style.opacity = '0.01'; // Quase invisível mas ainda clicável
+    colorInput.style.width = '1px';
+    colorInput.style.height = '1px';
+    colorInput.style.zIndex = '99999';
+    colorInput.style.left = '50%';
+    colorInput.style.top = '50%';
+    colorInput.style.pointerEvents = 'auto';
+    
+    // Focar e clicar
+    colorInput.focus();
+    
+    // Usar requestAnimationFrame para garantir que o DOM foi atualizado
+    requestAnimationFrame(() => {
+      try {
+        colorInput.click();
+        console.log('[openColorPicker] click() chamado');
+        
+        // Restaurar estilos após um delay
+        setTimeout(() => {
+          colorInput.style.display = originalDisplay;
+          colorInput.style.position = originalPosition;
+          colorInput.style.opacity = originalOpacity;
+          colorInput.style.width = originalWidth;
+          colorInput.style.height = originalHeight;
+          colorInput.style.zIndex = originalZIndex;
+        }, 200);
+      } catch (error) {
+        console.error('[openColorPicker] Erro ao clicar:', error);
+        // Restaurar estilos mesmo em caso de erro
+        colorInput.style.display = originalDisplay;
+        colorInput.style.position = originalPosition;
+        colorInput.style.opacity = originalOpacity;
+        colorInput.style.width = originalWidth;
+        colorInput.style.height = originalHeight;
+        colorInput.style.zIndex = originalZIndex;
+      }
+    });
+  } catch (error) {
+    console.error('[openColorPicker] Erro ao abrir color picker:', error);
   }
 }
 
@@ -448,14 +548,25 @@ function updateFileRef(file) {
   position: relative;
 }
 
+.color-preview-wrapper {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+}
+
 .color-input-hidden {
-  position: absolute;
+  position: fixed;
   opacity: 0;
-  width: 1px;
-  height: 1px;
+  width: 0;
+  height: 0;
   pointer-events: none;
   z-index: -1;
   left: -9999px;
+  top: -9999px;
+  overflow: hidden;
+  border: none;
+  padding: 0;
+  margin: 0;
 }
 </style>
 

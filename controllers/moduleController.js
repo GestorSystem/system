@@ -172,6 +172,57 @@ async function createModuleInternal(params) {
   const moduleJsonPath = path.join(modulePath, 'module.json');
   fs.writeFileSync(moduleJsonPath, JSON.stringify(moduleJson, null, 2), 'utf8');
   
+  // Criar package.json com type: "commonjs" para garantir que os models sejam carregados como CommonJS
+  // Isso é necessário porque o projeto principal pode ter "type": "module" no package.json
+  const packageJson = {
+    name: `@gestor/${name}`,
+    version: version,
+    description: description || '',
+    type: 'commonjs',
+    main: 'index.js',
+    keywords: ['gestor', name, 'module'],
+    author: '',
+    license: 'MIT',
+    gestor: {
+      module: true,
+      name: name,
+      title: title,
+      description: description || '',
+      version: version,
+      enabled: true,
+      dependencies: [],
+      isSystem: isSystem
+    }
+  };
+  
+  const packageJsonPath = path.join(modulePath, 'package.json');
+  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2), 'utf8');
+  
+  // Criar link simbólico no node_modules/@gestor/ para que o módulo seja detectado como "instalado"
+  try {
+    const projectRoot = findProjectRoot();
+    const nodeModulesGestorPath = path.join(projectRoot, 'node_modules', '@gestor');
+    const symlinkPath = path.join(nodeModulesGestorPath, name);
+    
+    // Criar diretório @gestor se não existir
+    if (!fs.existsSync(nodeModulesGestorPath)) {
+      fs.mkdirSync(nodeModulesGestorPath, { recursive: true });
+    }
+    
+    // Criar link simbólico se não existir
+    if (!fs.existsSync(symlinkPath)) {
+      // Usar caminho absoluto para o link simbólico funcionar corretamente
+      const absoluteModulePath = path.resolve(modulePath);
+      fs.symlinkSync(absoluteModulePath, symlinkPath, 'dir');
+      console.log(`[createModule] Link simbólico criado: ${symlinkPath} -> ${absoluteModulePath}`);
+    } else {
+      console.log(`[createModule] Link simbólico já existe: ${symlinkPath}`);
+    }
+  } catch (symlinkError) {
+    // Não falhar se não conseguir criar o link simbólico (pode não ter permissão ou node_modules não existir)
+    console.warn(`[createModule] Não foi possível criar link simbólico (não crítico): ${symlinkError.message}`);
+  }
+  
   // Criar arquivo README.md básico
   const readmePath = path.join(modulePath, 'README.md');
   const readmeContent = `# ${title}
@@ -394,6 +445,396 @@ function findUninstallSeeder(moduleName) {
   return null;
 }
 
+// Função para instalar módulo baseado no module.json
+async function installModuleFromJson(moduleConfig, moduleName, db) {
+  try {
+    console.log(`[installModuleFromJson] Instalando configurações do module.json para ${moduleName}...`);
+    
+    // Buscar sistema padrão (Manager ou primeiro disponível)
+    const System = db.System;
+    let system = await System.findOne({ where: { sigla: 'MANAGER' } });
+    if (!system) {
+      system = await System.findOne({ order: [['id', 'ASC']] });
+    }
+    if (!system) {
+      throw new Error('Sistema não encontrado. Certifique-se de que o sistema Manager está instalado.');
+    }
+    const systemId = system.id;
+    
+    // 1. Instalar Functions
+    if (moduleConfig.functions && Array.isArray(moduleConfig.functions)) {
+      const Function = db.Function;
+      for (const func of moduleConfig.functions) {
+        const [functionRecord, created] = await Function.findOrCreate({
+          where: { name: func.name },
+          defaults: {
+            name: func.name,
+            title: func.title || func.name
+          }
+        });
+        console.log(`${created ? '✅ Criada' : 'ℹ️  Já existe'} função: ${func.name}`);
+      }
+    }
+    
+    // 2. Instalar Menus
+    const createdMenus = {};
+    if (moduleConfig.menus && Array.isArray(moduleConfig.menus)) {
+      const Menu = db.Menu;
+      for (const menuConfig of moduleConfig.menus) {
+        const [menu, created] = await Menu.findOrCreate({
+          where: {
+            name: menuConfig.name,
+            id_system: menuConfig.id_system || systemId
+          },
+          defaults: {
+            name: menuConfig.name,
+            id_system: menuConfig.id_system || systemId,
+            id_organization: menuConfig.id_organization || null
+          }
+        });
+        createdMenus[menuConfig.name] = menu.id;
+        console.log(`${created ? '✅ Criado' : 'ℹ️  Já existe'} menu: ${menuConfig.name}`);
+      }
+    }
+    
+    // 3. Instalar Interfaces (CRUDs)
+    if (moduleConfig.interfaces && Array.isArray(moduleConfig.interfaces)) {
+      const Crud = db.Crud;
+      for (const interfaceConfig of moduleConfig.interfaces) {
+        const [crud, created] = await Crud.findOrCreate({
+          where: { resource: interfaceConfig.resource },
+          defaults: {
+            name: interfaceConfig.name,
+            title: interfaceConfig.title,
+            icon: interfaceConfig.icon,
+            resource: interfaceConfig.resource,
+            endpoint: interfaceConfig.endpoint,
+            config: interfaceConfig.config || {},
+            active: interfaceConfig.active !== false,
+            isSystem: interfaceConfig.isSystem || false
+          }
+        });
+        
+        if (!created) {
+          // Atualizar CRUD existente
+          await crud.update({
+            config: interfaceConfig.config || {},
+            active: interfaceConfig.active !== false
+          });
+        }
+        console.log(`${created ? '✅ Criada' : '✅ Atualizada'} interface: ${interfaceConfig.title}`);
+      }
+    }
+    
+    // 4. Instalar MenuItems
+    if (moduleConfig.menuItems && Array.isArray(moduleConfig.menuItems)) {
+      const MenuItems = db.MenuItems;
+      for (const menuItemConfig of moduleConfig.menuItems) {
+        // Resolver id_menu usando menuName
+        let menuId = menuItemConfig.id_menu;
+        if (!menuId && menuItemConfig.menuName) {
+          menuId = createdMenus[menuItemConfig.menuName];
+          if (!menuId) {
+            // Tentar buscar menu existente
+            const Menu = db.Menu;
+            const menu = await Menu.findOne({
+              where: {
+                name: menuItemConfig.menuName,
+                id_system: menuItemConfig.id_system || systemId
+              }
+            });
+            if (menu) {
+              menuId = menu.id;
+            }
+          }
+        }
+        
+        if (!menuId) {
+          console.warn(`⚠️  Menu "${menuItemConfig.menuName}" não encontrado para menuItem "${menuItemConfig.name}". Pulando...`);
+          continue;
+        }
+        
+        // Calcular ordem máxima
+        const maxOrder = await MenuItems.max('order', {
+          where: { id_menu: menuId }
+        }) || 0;
+        
+        const [menuItem, created] = await MenuItems.findOrCreate({
+          where: {
+            name: menuItemConfig.name,
+            id_menu: menuId,
+            route: menuItemConfig.route
+          },
+          defaults: {
+            name: menuItemConfig.name,
+            icon: menuItemConfig.icon,
+            route: menuItemConfig.route,
+            target_blank: menuItemConfig.target_blank || false,
+            id_menu: menuId,
+            id_system: menuItemConfig.id_system || systemId,
+            id_organization: menuItemConfig.id_organization || null,
+            id_role: menuItemConfig.id_role || null,
+            order: menuItemConfig.order || (maxOrder + 1)
+          }
+        });
+        
+        if (!created) {
+          // Atualizar ordem se necessário
+          await menuItem.update({ order: menuItemConfig.order || (maxOrder + 1) });
+        }
+        console.log(`${created ? '✅ Criado' : '✅ Atualizado'} menuItem: ${menuItemConfig.name}`);
+      }
+    }
+    
+    // 5. Instalar CronJobs
+    if (moduleConfig.cronJobs && Array.isArray(moduleConfig.cronJobs)) {
+      const CronJob = db.CronJob;
+      for (const cronJobConfig of moduleConfig.cronJobs) {
+        const [cronJob, created] = await CronJob.findOrCreate({
+          where: { name: cronJobConfig.name },
+          defaults: {
+            name: cronJobConfig.name,
+            description: cronJobConfig.description || '',
+            controller: cronJobConfig.controller,
+            method: cronJobConfig.method,
+            cronExpression: cronJobConfig.cronExpression,
+            active: cronJobConfig.active !== false,
+            lastExecution: null,
+            lastExecutionSuccess: null,
+            lastExecutionLog: null
+          }
+        });
+        
+        if (!created) {
+          // Atualizar cronJob existente
+          await cronJob.update({
+            description: cronJobConfig.description || '',
+            controller: cronJobConfig.controller,
+            method: cronJobConfig.method,
+            cronExpression: cronJobConfig.cronExpression,
+            active: cronJobConfig.active !== false
+          });
+        }
+        console.log(`${created ? '✅ Criado' : '✅ Atualizado'} cronJob: ${cronJobConfig.name}`);
+      }
+    }
+    
+    // 6. Instalar BatchJobs
+    if (moduleConfig.batchJobs && Array.isArray(moduleConfig.batchJobs)) {
+      const BatchJob = db.BatchJob;
+      for (const batchJobConfig of moduleConfig.batchJobs) {
+        const [batchJob, created] = await BatchJob.findOrCreate({
+          where: { name: batchJobConfig.name },
+          defaults: {
+            name: batchJobConfig.name,
+            description: batchJobConfig.description || '',
+            controller: batchJobConfig.controller,
+            method: batchJobConfig.method,
+            cronExpression: batchJobConfig.cronExpression,
+            parameters: batchJobConfig.parameters ? JSON.stringify(batchJobConfig.parameters) : null,
+            active: batchJobConfig.active !== false,
+            lastExecution: null,
+            lastExecutionSuccess: null,
+            lastExecutionLog: null,
+            totalExecutions: 0,
+            totalSuccess: 0,
+            totalErrors: 0
+          }
+        });
+        
+        if (!created) {
+          // Atualizar batchJob existente
+          await batchJob.update({
+            description: batchJobConfig.description || '',
+            controller: batchJobConfig.controller,
+            method: batchJobConfig.method,
+            cronExpression: batchJobConfig.cronExpression,
+            parameters: batchJobConfig.parameters ? JSON.stringify(batchJobConfig.parameters) : null,
+            active: batchJobConfig.active !== false
+          });
+        }
+        console.log(`${created ? '✅ Criado' : '✅ Atualizado'} batchJob: ${batchJobConfig.name}`);
+      }
+    }
+    
+    // 7. Instalar Queues
+    if (moduleConfig.queues && Array.isArray(moduleConfig.queues)) {
+      const Queue = db.Queue;
+      for (const queueConfig of moduleConfig.queues) {
+        const [queue, created] = await Queue.findOrCreate({
+          where: { name: queueConfig.name },
+          defaults: {
+            name: queueConfig.name,
+            description: queueConfig.description || '',
+            controller: queueConfig.controller,
+            method: queueConfig.method,
+            itemsPerBatch: queueConfig.itemsPerBatch || 10,
+            maxAttempts: queueConfig.maxAttempts || 3,
+            retryDelay: queueConfig.retryDelay || 60,
+            active: queueConfig.active !== false,
+            processing: false,
+            lastProcessed: null,
+            totalItems: 0,
+            totalProcessed: 0,
+            totalFailed: 0
+          }
+        });
+        
+        if (!created) {
+          // Atualizar queue existente
+          await queue.update({
+            description: queueConfig.description || '',
+            controller: queueConfig.controller,
+            method: queueConfig.method,
+            itemsPerBatch: queueConfig.itemsPerBatch || 10,
+            maxAttempts: queueConfig.maxAttempts || 3,
+            retryDelay: queueConfig.retryDelay || 60,
+            active: queueConfig.active !== false
+          });
+        }
+        console.log(`${created ? '✅ Criado' : '✅ Atualizado'} queue: ${queueConfig.name}`);
+      }
+    }
+    
+    console.log(`✅ Instalação do module.json concluída para ${moduleName}`);
+  } catch (error) {
+    console.error(`❌ Erro ao instalar configurações do module.json para ${moduleName}:`, error);
+    throw error;
+  }
+}
+
+// Função para desinstalar módulo baseado no module.json
+async function uninstallModuleFromJson(moduleConfig, moduleName, db) {
+  try {
+    console.log(`[uninstallModuleFromJson] Desinstalando configurações do module.json para ${moduleName}...`);
+    
+    // Buscar sistema padrão
+    const System = db.System;
+    let system = await System.findOne({ where: { sigla: 'MANAGER' } });
+    if (!system) {
+      system = await System.findOne({ order: [['id', 'ASC']] });
+    }
+    if (!system) {
+      throw new Error('Sistema não encontrado.');
+    }
+    const systemId = system.id;
+    
+    // 1. Remover MenuItems
+    if (moduleConfig.menuItems && Array.isArray(moduleConfig.menuItems)) {
+      const MenuItems = db.MenuItems;
+      const routes = moduleConfig.menuItems.map(item => item.route).filter(Boolean);
+      if (routes.length > 0) {
+        await MenuItems.destroy({
+          where: {
+            route: routes,
+            id_system: systemId
+          }
+        });
+        console.log(`✅ Removidos ${routes.length} menuItem(s)`);
+      }
+    }
+    
+    // 2. Desativar Interfaces (CRUDs) - não remover, apenas desativar
+    if (moduleConfig.interfaces && Array.isArray(moduleConfig.interfaces)) {
+      const Crud = db.Crud;
+      const resources = moduleConfig.interfaces.map(iface => iface.resource).filter(Boolean);
+      if (resources.length > 0) {
+        await Crud.update(
+          { active: false },
+          { where: { resource: resources } }
+        );
+        console.log(`✅ Desativadas ${resources.length} interface(s)`);
+      }
+    }
+    
+    // 3. Remover Menus (apenas se não tiverem outros menuItems)
+    if (moduleConfig.menus && Array.isArray(moduleConfig.menus)) {
+      const Menu = db.Menu;
+      const MenuItems = db.MenuItems;
+      for (const menuConfig of moduleConfig.menus) {
+        const menu = await Menu.findOne({
+          where: {
+            name: menuConfig.name,
+            id_system: menuConfig.id_system || systemId
+          }
+        });
+        
+        if (menu) {
+          // Verificar se há outros menuItems neste menu
+          const otherMenuItems = await MenuItems.count({
+            where: {
+              id_menu: menu.id,
+              route: { [db.Sequelize.Op.notIn]: moduleConfig.menuItems?.map(item => item.route).filter(Boolean) || [] }
+            }
+          });
+          
+          if (otherMenuItems === 0) {
+            await Menu.destroy({ where: { id: menu.id } });
+            console.log(`✅ Removido menu: ${menuConfig.name}`);
+          } else {
+            console.log(`ℹ️  Menu "${menuConfig.name}" mantido (possui outros itens)`);
+          }
+        }
+      }
+    }
+    
+    // 4. Desativar CronJobs
+    if (moduleConfig.cronJobs && Array.isArray(moduleConfig.cronJobs)) {
+      const CronJob = db.CronJob;
+      const cronJobNames = moduleConfig.cronJobs.map(job => job.name).filter(Boolean);
+      if (cronJobNames.length > 0) {
+        await CronJob.update(
+          { active: false },
+          { where: { name: cronJobNames } }
+        );
+        console.log(`✅ Desativados ${cronJobNames.length} cronJob(s)`);
+      }
+    }
+    
+    // 5. Desativar BatchJobs
+    if (moduleConfig.batchJobs && Array.isArray(moduleConfig.batchJobs)) {
+      const BatchJob = db.BatchJob;
+      const batchJobNames = moduleConfig.batchJobs.map(job => job.name).filter(Boolean);
+      if (batchJobNames.length > 0) {
+        await BatchJob.update(
+          { active: false },
+          { where: { name: batchJobNames } }
+        );
+        console.log(`✅ Desativados ${batchJobNames.length} batchJob(s)`);
+      }
+    }
+    
+    // 6. Desativar Queues
+    if (moduleConfig.queues && Array.isArray(moduleConfig.queues)) {
+      const Queue = db.Queue;
+      const queueNames = moduleConfig.queues.map(queue => queue.name).filter(Boolean);
+      if (queueNames.length > 0) {
+        await Queue.update(
+          { active: false },
+          { where: { name: queueNames } }
+        );
+        console.log(`✅ Desativadas ${queueNames.length} queue(s)`);
+      }
+    }
+    
+    // 7. Remover Functions (opcional - pode manter para histórico)
+    // Comentado para manter histórico, mas pode ser descomentado se necessário
+    // if (moduleConfig.functions && Array.isArray(moduleConfig.functions)) {
+    //   const Function = db.Function;
+    //   const functionNames = moduleConfig.functions.map(f => f.name).filter(Boolean);
+    //   if (functionNames.length > 0) {
+    //     await Function.destroy({ where: { name: functionNames } });
+    //     console.log(`✅ Removidas ${functionNames.length} função(ões)`);
+    //   }
+    // }
+    
+    console.log(`✅ Desinstalação do module.json concluída para ${moduleName}`);
+  } catch (error) {
+    console.error(`❌ Erro ao desinstalar configurações do module.json para ${moduleName}:`, error);
+    throw error;
+  }
+}
+
 // Instalar um módulo
 async function installModule(req, res) {
   try {
@@ -460,11 +901,13 @@ async function installModuleInternal(moduleName) {
     throw new Error(`Módulo ${moduleName} não encontrado`);
   }
   
-  // Habilitar módulo (suporta apenas npm/@gestor)
+  // Habilitar módulo (suporta npm/@gestor e módulos locais)
   // IMPORTANTE: Usar caminho relativo dinâmico, não hardcoded "frontend/"
   const projectRoot = findProjectRoot();
+  const localModulesPath = getModulesPath();
 
   const possibleModuleBases = [
+    path.join(localModulesPath, moduleName),                            // Local: modules/<name> (prioridade)
     path.join(projectRoot, 'node_modules', '@gestor', moduleName),     // npm: projectRoot/node_modules/@gestor/<name>
     path.join(__dirname, '../../../../node_modules/@gestor', moduleName) // npm quando system está em node_modules
   ];
@@ -506,10 +949,13 @@ async function installModuleInternal(moduleName) {
 
   fs.writeFileSync(moduleConfigPath, JSON.stringify(currentConfig, null, 2), 'utf8');
   
-  // Encontrar e executar seeder de instalação
+  // Instalar interfaces, menus, menuItems e functions do module.json
+  const db = getDb();
+  await installModuleFromJson(currentConfig, moduleName, db);
+  
+  // Encontrar e executar seeder de instalação (se existir, para compatibilidade com módulos antigos)
   const installSeederPath = findInstallSeeder(moduleName);
   if (installSeederPath) {
-    const db = getDb();
     const queryInterface = db.sequelize.getQueryInterface();
     const seederModule = require(installSeederPath);
     
@@ -525,6 +971,19 @@ async function installModuleInternal(moduleName) {
     } else if (typeof seederModule === 'function') {
       await seederModule();
     }
+  }
+  
+  // Recarregar rotas dinâmicas após instalação do módulo
+  try {
+    const dynamicReload = require('../utils/dynamicReload');
+    const reloadResult = await dynamicReload.reloadDynamicRoutes();
+    if (reloadResult.success) {
+      console.log(`✅ Rotas dinâmicas recarregadas após instalação do módulo ${moduleName}`);
+    } else {
+      console.warn(`⚠️  Aviso: Falha ao recarregar rotas dinâmicas: ${reloadResult.message}`);
+    }
+  } catch (reloadError) {
+    console.warn(`⚠️  Erro ao recarregar rotas dinâmicas (não crítico): ${reloadError.message}`);
   }
   
   return {
@@ -569,10 +1028,35 @@ async function uninstallModule(req, res) {
       });
     }
     
-    // Executar seeder de desinstalação
+    // Desinstalar interfaces, menus, menuItems e functions do module.json
+    const db = getDb();
+    
+    // Buscar module.json do módulo
+    const projectRoot = findProjectRoot();
+    const localModulesPath = getModulesPath();
+    const possibleModuleBases = [
+      path.join(localModulesPath, name),
+      path.join(projectRoot, 'node_modules', '@gestor', name),
+      path.join(__dirname, '../../../../node_modules/@gestor', name)
+    ];
+    
+    let moduleJsonPath = null;
+    for (const basePath of possibleModuleBases) {
+      const testPath = path.join(basePath, 'module.json');
+      if (fs.existsSync(testPath)) {
+        moduleJsonPath = testPath;
+        break;
+      }
+    }
+    
+    if (moduleJsonPath) {
+      const moduleConfig = JSON.parse(fs.readFileSync(moduleJsonPath, 'utf8'));
+      await uninstallModuleFromJson(moduleConfig, name, db);
+    }
+    
+    // Executar seeder de desinstalação (se existir, para compatibilidade com módulos antigos)
     const uninstallSeederPath = findUninstallSeeder(name);
     if (uninstallSeederPath) {
-      const db = getDb();
       const queryInterface = db.sequelize.getQueryInterface();
       const seederModule = require(uninstallSeederPath);
       
@@ -583,12 +1067,7 @@ async function uninstallModule(req, res) {
     
     // Desabilitar módulo (apenas npm/@gestor)
     // IMPORTANTE: Usar caminho relativo dinâmico, não hardcoded "frontend/"
-    const projectRoot = findProjectRoot();
-
-    const possibleModuleBases = [
-      path.join(projectRoot, 'node_modules', '@gestor', name),     // npm: projectRoot/node_modules/@gestor/<name>
-      path.join(__dirname, '../../../../node_modules/@gestor', name) // npm quando system está em node_modules
-    ];
+    // Reutilizar projectRoot e possibleModuleBases já declarados acima
 
     let moduleConfigPath = null;
     let resolvedModulePath = null;
@@ -626,7 +1105,20 @@ async function uninstallModule(req, res) {
     }
 
     fs.writeFileSync(moduleConfigPath, JSON.stringify(currentConfig, null, 2), 'utf8');
-
+    
+    // Recarregar rotas dinâmicas após desinstalação do módulo
+    try {
+      const dynamicReload = require('../utils/dynamicReload');
+      const reloadResult = await dynamicReload.reloadDynamicRoutes();
+      if (reloadResult.success) {
+        console.log(`✅ Rotas dinâmicas recarregadas após desinstalação do módulo ${name}`);
+      } else {
+        console.warn(`⚠️  Aviso: Falha ao recarregar rotas dinâmicas: ${reloadResult.message}`);
+      }
+    } catch (reloadError) {
+      console.warn(`⚠️  Erro ao recarregar rotas dinâmicas (não crítico): ${reloadError.message}`);
+    }
+    
     res.json({
       message: 'Módulo desinstalado com sucesso',
       module: {

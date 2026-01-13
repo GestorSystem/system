@@ -169,10 +169,139 @@ function loadModules() {
     console.log(`[moduleLoader] ✅ Encontrado node_modules/@gestor em: ${gestorModulesPath}`);
   }
   
+  // Carregar package.json do frontend para verificar dependências instaladas
+  let frontendPackageJson = null;
+  let frontendDependencies = new Set();
+  
+  try {
+    // Encontrar raiz do projeto (onde está o package.json do frontend)
+    let projectRoot = process.cwd();
+    let currentPath = __dirname;
+    for (let i = 0; i < 10; i++) {
+      const packageJsonPath = path.join(currentPath, 'package.json');
+      const nodeModulesPath = path.join(currentPath, 'node_modules', '@gestor');
+      if (fs.existsSync(packageJsonPath) && fs.existsSync(nodeModulesPath)) {
+        projectRoot = currentPath;
+        break;
+      }
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) break;
+      currentPath = parentPath;
+    }
+    
+    const frontendPackageJsonPath = path.join(projectRoot, 'package.json');
+    if (fs.existsSync(frontendPackageJsonPath)) {
+      frontendPackageJson = JSON.parse(fs.readFileSync(frontendPackageJsonPath, 'utf8'));
+      // Coletar todas as dependências (dependencies e devDependencies)
+      const allDeps = {
+        ...(frontendPackageJson.dependencies || {}),
+        ...(frontendPackageJson.devDependencies || {})
+      };
+      frontendDependencies = new Set(Object.keys(allDeps));
+      console.log(`[moduleLoader] Dependências encontradas no package.json: ${Array.from(frontendDependencies).filter(d => d.startsWith('@gestor/')).join(', ')}`);
+    }
+  } catch (error) {
+    console.error('[moduleLoader] Erro ao carregar package.json do frontend:', error.message);
+  }
+  
+  // Função auxiliar para verificar se um módulo está instalado
+  function isModuleInstalled(moduleName) {
+    const packageName = `@gestor/${moduleName}`;
+    return frontendDependencies.has(packageName);
+  }
+  
+  // Primeiro, carregar módulos locais (pasta modules/) - terão prioridade
+  const localModulesMap = new Map(); // Map para rastrear módulos locais por nome
+  
+  try {
+    // Carregar .env se ainda não foi carregado
+    try {
+      require('dotenv').config();
+    } catch (e) {
+      // Ignorar erro se dotenv não estiver disponível
+    }
+    
+    // Encontrar raiz do projeto (já encontrado acima)
+    let projectRoot = process.cwd();
+    let currentPath = __dirname;
+    for (let i = 0; i < 10; i++) {
+      const packageJsonPath = path.join(currentPath, 'package.json');
+      const nodeModulesPath = path.join(currentPath, 'node_modules', '@gestor');
+      if (fs.existsSync(packageJsonPath) && fs.existsSync(nodeModulesPath)) {
+        projectRoot = currentPath;
+        break;
+      }
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) break;
+      currentPath = parentPath;
+    }
+    
+    const modulesFolder = process.env.MODULES_FOLDER || 'modules';
+    const localModulesPath = path.join(projectRoot, modulesFolder);
+    
+    if (fs.existsSync(localModulesPath)) {
+      const localModuleDirs = fs.readdirSync(localModulesPath, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory() || dirent.isSymbolicLink())
+        .map(dirent => dirent.name);
+      
+      for (const moduleName of localModuleDirs) {
+        const modulePath = path.join(localModulesPath, moduleName);
+        const moduleJsonPath = path.join(modulePath, 'module.json');
+        
+        try {
+          // Carregar apenas se tiver module.json
+          if (fs.existsSync(moduleJsonPath)) {
+            const moduleInfo = JSON.parse(fs.readFileSync(moduleJsonPath, 'utf8'));
+            moduleInfo.path = modulePath;
+            moduleInfo.name = moduleInfo.name || moduleName;
+            moduleInfo.source = 'local';
+            // Verificar se está instalado checando o package.json do frontend
+            moduleInfo.installed = isModuleInstalled(moduleInfo.name);
+            // Determinar se está habilitado
+            const isSystemModule = moduleInfo.isSystem === true;
+            if (isSystemModule) {
+              moduleInfo.enabled = true; // Módulos de sistema sempre habilitados
+            } else {
+              // Para módulos não-sistema:
+              // - Se enabled está explicitamente definido no module.json, respeitar
+              // - Caso contrário, só habilitar se estiver instalado
+              if (moduleInfo.enabled !== undefined) {
+                // Respeitar o valor explícito do module.json (pode ser true ou false)
+                moduleInfo.enabled = Boolean(moduleInfo.enabled);
+              } else {
+                // Se não está definido, só habilitar se estiver instalado
+                moduleInfo.enabled = moduleInfo.installed;
+              }
+            }
+            
+            // Normalizar dependências: converter @gestor/nome para nome
+            if (moduleInfo.dependencies && Array.isArray(moduleInfo.dependencies)) {
+              moduleInfo.dependencies = moduleInfo.dependencies.map(dep => {
+                if (dep.startsWith('@gestor/')) {
+                  return dep.replace('@gestor/', '');
+                }
+                return dep;
+              });
+            }
+            
+            localModulesMap.set(moduleInfo.name, moduleInfo);
+          }
+        } catch (error) {
+          console.error(`Erro ao carregar módulo local ${moduleName}:`, error.message);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao carregar módulos locais:', error.message);
+  }
+  
+  // Depois, carregar módulos instalados (node_modules/@gestor) - apenas se não existir versão local
   if (gestorModulesPath && fs.existsSync(gestorModulesPath)) {
     const npmModuleDirs = fs.readdirSync(gestorModulesPath, { withFileTypes: true })
       .filter(dirent => dirent.isDirectory() || dirent.isSymbolicLink())
       .map(dirent => dirent.name);
+    
+    console.log(`[moduleLoader] Encontrados ${npmModuleDirs.length} módulos npm em: ${gestorModulesPath}`);
     
     for (const moduleName of npmModuleDirs) {
       const modulePath = path.join(gestorModulesPath, moduleName);
@@ -181,11 +310,6 @@ function loadModules() {
       const indexJsPath = path.join(modulePath, 'index.js');
       
       try {
-        // Verificar se já foi adicionado (evitar duplicatas)
-        if (isModuleAlreadyAdded(modulePath)) {
-          continue;
-        }
-        
         let moduleInfo = null;
         
         // Tentar carregar de module.json primeiro
@@ -205,10 +329,30 @@ function loadModules() {
         }
         
         if (moduleInfo) {
+          const normalizedName = moduleInfo.name || moduleName;
+          
+          // Se já existe versão local, pular (dar preferência à versão local)
+          if (localModulesMap.has(normalizedName)) {
+            console.log(`[moduleLoader] Módulo ${normalizedName} existe localmente, pulando versão npm`);
+            continue;
+          }
+          
+          // Verificar se já foi adicionado (evitar duplicatas)
+          if (isModuleAlreadyAdded(modulePath)) {
+            continue;
+          }
+          
           moduleInfo.path = modulePath;
-          // Extrair nome do módulo do nome do pacote (@gestor/pessoa -> pessoa)
-          moduleInfo.name = moduleInfo.name || moduleName;
+          moduleInfo.name = normalizedName;
           moduleInfo.source = 'npm';
+          // Verificar se está instalado checando o package.json do frontend
+          moduleInfo.installed = isModuleInstalled(normalizedName);
+          // Módulos instalados podem estar habilitados (respeitar o enabled do module.json, mas garantir que está definido)
+          if (moduleInfo.enabled === undefined) {
+            moduleInfo.enabled = moduleInfo.installed; // Por padrão, módulos instalados estão habilitados
+          }
+          
+          console.log(`[moduleLoader] Módulo npm ${normalizedName} marcado como installed: ${moduleInfo.installed}, enabled: ${moduleInfo.enabled}`);
           
           // Normalizar dependências: converter @gestor/nome para nome
           if (moduleInfo.dependencies && Array.isArray(moduleInfo.dependencies)) {
@@ -226,6 +370,29 @@ function loadModules() {
         console.error(`Erro ao carregar módulo npm ${moduleName}:`, error.message);
       }
     }
+  } else {
+    console.log(`[moduleLoader] ⚠️  gestorModulesPath não encontrado: ${gestorModulesPath}`);
+  }
+  
+  // Adicionar todos os módulos locais ao array final
+  // O installed e enabled já foram definidos acima baseado no package.json
+  for (const [moduleName, moduleInfo] of localModulesMap) {
+    // Verificar novamente se está instalado (pode ter mudado se foi adicionado via npm depois)
+    const wasInstalled = moduleInfo.installed;
+    moduleInfo.installed = isModuleInstalled(moduleInfo.name);
+    
+    // Se o status de instalação mudou, atualizar enabled
+    if (wasInstalled !== moduleInfo.installed) {
+      const isSystemModule = moduleInfo.isSystem === true;
+      if (isSystemModule) {
+        moduleInfo.enabled = true; // Módulos de sistema sempre habilitados
+      } else {
+        moduleInfo.enabled = moduleInfo.installed; // Outros módulos só habilitados se instalados
+      }
+      console.log(`[moduleLoader] Módulo local ${moduleName} - installed: ${moduleInfo.installed}, enabled: ${moduleInfo.enabled}`);
+    }
+    
+    modules.push(moduleInfo);
   }
   
   return modules;
@@ -249,13 +416,21 @@ function loadModuleModels(sequelize, DataTypes) {
   
   // Carregar models de cada módulo
   for (const module of modules) {
-    if (!module.enabled) continue;
+    // Módulos de sistema sempre devem ser carregados, mesmo se não estiverem instalados
+    // Outros módulos são carregados se estiverem habilitados (independente de installed)
+    // Isso permite que módulos criados pelo ChatIA (enabled: true, installed: false) tenham seus models carregados
+    if (!module.isSystem && !module.enabled) {
+      console.log(`[moduleLoader] Pulando módulo ${module.name} - enabled: ${module.enabled}, installed: ${module.installed}, isSystem: ${module.isSystem}`);
+      continue;
+    }
     
     const modelsPath = path.join(module.path, 'models');
     
     if (fs.existsSync(modelsPath)) {
       const modelFiles = fs.readdirSync(modelsPath)
         .filter(file => file.indexOf('.') !== 0 && file.slice(-3) === '.js');
+      
+      console.log(`[moduleLoader] Carregando ${modelFiles.length} model(s) do módulo ${module.name}...`);
       
       for (const file of modelFiles) {
         try {
@@ -267,10 +442,14 @@ function loadModuleModels(sequelize, DataTypes) {
           if (modelName !== file.replace('.js', '')) {
             db[file.replace('.js', '')] = model;
           }
+          console.log(`[moduleLoader] ✅ Model "${modelName}" carregado do módulo ${module.name} (arquivo: ${file})`);
         } catch (error) {
-          console.error(`Erro ao carregar model ${file} do módulo ${module.name}:`, error.message);
+          console.error(`[moduleLoader] ❌ Erro ao carregar model ${file} do módulo ${module.name}:`, error.message);
+          console.error(`[moduleLoader] Stack trace:`, error.stack);
         }
       }
+    } else {
+      console.log(`[moduleLoader] ⚠️  Diretório de models não encontrado para módulo ${module.name}: ${modelsPath}`);
     }
   }
   
@@ -285,7 +464,12 @@ function loadModuleRoutes(app) {
   const modules = loadModules();
   
   for (const module of modules) {
-    if (!module.enabled) continue;
+    // Módulos de sistema sempre devem ter rotas carregadas, mesmo se não estiverem instalados
+    // Outros módulos têm rotas carregadas se estiverem habilitados (independente de installed)
+    // Isso permite que módulos criados pelo ChatIA (enabled: true, installed: false) tenham suas rotas carregadas
+    if (!module.isSystem && !module.enabled) {
+      continue;
+    }
     
     const routesPath = path.join(module.path, 'routes');
     
@@ -406,8 +590,11 @@ function getModuleMigrationsPaths() {
   console.log(`[moduleLoader] Carregando migrations de ${modules.length} módulo(s) (${sortedModules.filter(m => m.enabled).length} habilitado(s))`);
   
   for (const module of sortedModules) {
-    if (!module.enabled) {
-      console.log(`[moduleLoader] Pulando módulo ${module.name} (desabilitado)`);
+    // Módulos de sistema sempre devem ter migrations carregadas, mesmo se não estiverem instalados
+    // Outros módulos têm migrations carregadas se estiverem habilitados (independente de installed)
+    // Isso permite que módulos criados pelo ChatIA (enabled: true, installed: false) tenham suas migrations executadas
+    if (!module.isSystem && !module.enabled) {
+      console.log(`[moduleLoader] Pulando módulo ${module.name} (enabled: ${module.enabled}, installed: ${module.installed})`);
       continue;
     }
     
@@ -436,8 +623,11 @@ function getModuleSeedersPaths() {
   console.log(`[moduleLoader] Carregando seeders de ${modules.length} módulo(s) (${sortedModules.filter(m => m.enabled).length} habilitado(s))`);
   
   for (const module of sortedModules) {
-    if (!module.enabled) {
-      console.log(`[moduleLoader] Pulando módulo ${module.name} (desabilitado)`);
+    // Módulos de sistema sempre devem ter seeders carregados, mesmo se não estiverem instalados
+    // Outros módulos têm seeders carregados se estiverem habilitados (independente de installed)
+    // Isso permite que módulos criados pelo ChatIA (enabled: true, installed: false) tenham seus seeders executados
+    if (!module.isSystem && !module.enabled) {
+      console.log(`[moduleLoader] Pulando módulo ${module.name} (enabled: ${module.enabled}, installed: ${module.installed})`);
       continue;
     }
     

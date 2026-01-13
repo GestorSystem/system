@@ -40,6 +40,30 @@ function getModulesPath() {
   return path.join(projectRoot, modulesFolder);
 }
 
+// Função helper para verificar se um módulo existe (na pasta ou no moduleLoader)
+function moduleExists(moduleName) {
+  // Primeiro, verificar se existe na pasta modules/
+  const modulesPath = getModulesPath();
+  const modulePath = path.join(modulesPath, moduleName);
+  if (fs.existsSync(modulePath)) {
+    const moduleJsonPath = path.join(modulePath, 'module.json');
+    if (fs.existsSync(moduleJsonPath)) {
+      return true; // Módulo existe na pasta, mesmo que não esteja enabled
+    }
+  }
+  
+  // Depois, verificar no moduleLoader (módulos instalados)
+  try {
+    const { loadModules } = require('../utils/moduleLoader');
+    const modules = loadModules();
+    const module = modules.find(m => m.name === moduleName);
+    return !!module; // Retorna true se encontrou, mesmo que não esteja enabled
+  } catch (error) {
+    console.error('[moduleExists] Erro ao carregar módulos:', error);
+    return false;
+  }
+}
+
 // Variável global de debug do chat (controlada por variável de ambiente)
 const CHAT_DEBUG = process.env.CHAT_DEBUG === 'true' || process.env.CHAT_DEBUG === '1';
 
@@ -90,6 +114,7 @@ async function createSeederInternal(params) {
     try {
       // Buscar informações da model para validar tableName e campos
       const modelController = require('./modelController');
+      const db = getDb();
       const { ModelDefinition } = db;
       const normalizedName = modelController.normalizeModelName(name);
       let modelInfo = null;
@@ -253,11 +278,8 @@ async function createSeederInternal(params) {
     // Determinar caminho baseado no módulo
     let seedersPath;
     if (module) {
-      const { loadModules } = require('../utils/moduleLoader');
-      const modules = loadModules();
-      const moduleExists = modules.find(m => m.name === module && m.enabled);
-      
-      if (!moduleExists) {
+      // Verificar se o módulo existe (na pasta ou no moduleLoader)
+      if (!moduleExists(module)) {
         return { success: false, message: `Módulo "${module}" não existe ou não está habilitado` };
       }
       
@@ -431,6 +453,10 @@ const availableFunctions = {
         }
       }
       
+      // Obter models do banco de dados
+      const db = getDb();
+      const { Crud } = db;
+      
       // Verificar se já existe um CRUD com o mesmo name
       const existingCrud = await Crud.findOne({ where: { name } });
       if (existingCrud) {
@@ -483,6 +509,8 @@ const availableFunctions = {
 
   getCruds: async () => {
     try {
+      const db = getDb();
+      const { Crud } = db;
       const cruds = await Crud.findAll({
         where: { active: true },
         order: [['title', 'ASC']],
@@ -496,6 +524,8 @@ const availableFunctions = {
 
   getCrud: async (params) => {
     try {
+      const db = getDb();
+      const { Crud } = db;
       const { id, name } = params;
       
       console.log('[getCrud] Parâmetros recebidos:', { id, name });
@@ -549,6 +579,8 @@ const availableFunctions = {
     }
 
     try {
+      const db = getDb();
+      const { Crud } = db;
       // Buscar CRUD por ID ou nome
       let crud;
       if (id) {
@@ -577,7 +609,7 @@ const availableFunctions = {
       if (endpoint !== undefined) crud.endpoint = endpoint;
       if (active !== undefined) crud.active = active;
       if (name !== undefined && name !== crud.name) {
-        // Verificar se o novo nome já existe
+        // Crud já foi obtido do db acima
         const existingCrud = await Crud.findOne({ where: { name } });
         if (existingCrud && existingCrud.id !== crud.id) {
           return { success: false, message: 'Já existe uma Interface com este nome' };
@@ -622,35 +654,56 @@ const availableFunctions = {
   },
 
   createFunction: async (params) => {
-    const { name, title } = params;
-    const func = await Function.create({ name, title });
-    return { success: true, data: func, message: `Função "${title}" criada com sucesso!` };
+    try {
+      const db = getDb();
+      const { Function } = db;
+      const { name, title } = params;
+      const func = await Function.create({ name, title });
+      return { success: true, data: func, message: `Função "${title}" criada com sucesso!` };
+    } catch (error) {
+      console.error('[createFunction] Erro:', error);
+      return { success: false, message: `Erro ao executar createFunction: ${error.message}` };
+    }
   },
 
   createMenu: async (params) => {
-    const { name, id_system, id_organization } = params;
-    const menu = await Menu.create({
-      name,
-      id_system,
-      id_organization: id_organization || null
-    });
-    return { success: true, data: menu, message: `Menu "${name}" criado com sucesso!` };
+    try {
+      const db = getDb();
+      const { Menu } = db;
+      const { name, id_system, id_organization } = params;
+      const menu = await Menu.create({
+        name,
+        id_system,
+        id_organization: id_organization || null
+      });
+      return { success: true, data: menu, message: `Menu "${name}" criado com sucesso!` };
+    } catch (error) {
+      console.error('[createMenu] Erro:', error);
+      return { success: false, message: `Erro ao criar menu: ${error.message}` };
+    }
   },
 
   createMenuItem: async (params) => {
-    const { name, icon, route, target_blank, id_menu, id_system, id_organization, id_role, order } = params;
-    const menuItem = await MenuItems.create({
-      name,
-      icon: icon || null,
-      route,
-      target_blank: target_blank || false,
-      id_menu,
-      id_system,
-      id_organization: id_organization || null,
-      id_role: id_role || null,
-      order: order || 0
-    });
-    return { success: true, data: menuItem, message: `Item de menu "${name}" criado com sucesso!` };
+    try {
+      const db = getDb();
+      const { MenuItems } = db;
+      const { name, icon, route, target_blank, id_menu, id_system, id_organization, id_role, order } = params;
+      const menuItem = await MenuItems.create({
+        name,
+        icon: icon || null,
+        route,
+        target_blank: target_blank || false,
+        id_menu,
+        id_system,
+        id_organization: id_organization || null,
+        id_role: id_role || null,
+        order: order || 0
+      });
+      return { success: true, data: menuItem, message: `Item de menu "${name}" criado com sucesso!` };
+    } catch (error) {
+      console.error('[createMenuItem] Erro:', error);
+      return { success: false, message: `Erro ao criar item de menu: ${error.message}` };
+    }
   },
 
   createMigration: async (params) => {
@@ -864,11 +917,8 @@ const availableFunctions = {
       // Determinar caminho baseado no módulo
       let migrationsPath;
       if (module) {
-        const { loadModules } = require('../utils/moduleLoader');
-        const modules = loadModules();
-        const moduleExists = modules.find(m => m.name === module && m.enabled);
-        
-        if (!moduleExists) {
+        // Verificar se o módulo existe (na pasta ou no moduleLoader)
+        if (!moduleExists(module)) {
           return { success: false, message: `Módulo "${module}" não existe ou não está habilitado` };
         }
         
@@ -1261,64 +1311,72 @@ const availableFunctions = {
   },
 
   assignPermissionsToRole: async (params) => {
-    const { roleId, functionIds } = params;
-    
-    // Validar que functionIds é um array de números
-    if (!Array.isArray(functionIds)) {
-      return { success: false, message: 'functionIds deve ser um array de números' };
-    }
-    
-    // Validar que todos os IDs são números válidos
-    const invalidIds = functionIds.filter(id => typeof id !== 'number' || isNaN(id) || id <= 0);
-    if (invalidIds.length > 0) {
-      console.error('[assignPermissionsToRole] IDs inválidos recebidos:', invalidIds);
-      return { 
-        success: false, 
-        message: `IDs inválidos recebidos: ${invalidIds.join(', ')}. Os IDs devem ser números válidos extraídos dos resultados de createFunction (campo data.id).` 
-      };
-    }
-    
-    const role = await Role.findByPk(roleId);
-    if (!role) {
-      return { success: false, message: 'Role não encontrada' };
-    }
-    
-    // Verificar se as funções existem no banco de dados
-    const functions = await Function.findAll({ where: { id: functionIds } });
-    const foundFunctionIds = functions.map(f => f.id);
-    const missingIds = functionIds.filter(id => !foundFunctionIds.includes(id));
-    
-    if (missingIds.length > 0) {
-      console.error('[assignPermissionsToRole] Funções não encontradas:', missingIds);
-      return { 
-        success: false, 
-        message: `Funções com IDs ${missingIds.join(', ')} não foram encontradas no banco de dados. Certifique-se de usar os IDs reais retornados por createFunction.` 
-      };
-    }
-    
-    // Buscar funções existentes da role
-    const existingFunctions = await role.getFunctions();
-    const existingFunctionIds = existingFunctions.map(f => f.id);
-    
-    // Filtrar apenas as novas funções que ainda não estão associadas
-    const newFunctionIds = functionIds.filter(id => !existingFunctionIds.includes(id));
-    
-    // Adicionar apenas as novas funções sem remover as existentes
-    if (newFunctionIds.length > 0) {
-      await role.addFunctions(newFunctionIds);
-      return { 
-        success: true, 
-        message: `${newFunctionIds.length} nova(s) permissão(ões) adicionada(s) à role com sucesso!` 
-      };
-    } else {
-      return { 
-        success: true, 
-        message: `Todas as permissões já estavam associadas à role.` 
-      };
+    try {
+      const db = getDb();
+      const { Role, Function } = db;
+      const { roleId, functionIds } = params;
+      
+      // Validar que functionIds é um array de números
+      if (!Array.isArray(functionIds)) {
+        return { success: false, message: 'functionIds deve ser um array de números' };
+      }
+      
+      // Validar que todos os IDs são números válidos
+      const invalidIds = functionIds.filter(id => typeof id !== 'number' || isNaN(id) || id <= 0);
+      if (invalidIds.length > 0) {
+        console.error('[assignPermissionsToRole] IDs inválidos recebidos:', invalidIds);
+        return { 
+          success: false, 
+          message: `IDs inválidos recebidos: ${invalidIds.join(', ')}. Os IDs devem ser números válidos extraídos dos resultados de createFunction (campo data.id).` 
+        };
+      }
+      
+      const role = await Role.findByPk(roleId);
+      if (!role) {
+        return { success: false, message: 'Role não encontrada' };
+      }
+      
+      // Verificar se as funções existem no banco de dados
+      const functions = await Function.findAll({ where: { id: functionIds } });
+      const foundFunctionIds = functions.map(f => f.id);
+      const missingIds = functionIds.filter(id => !foundFunctionIds.includes(id));
+      
+      if (missingIds.length > 0) {
+        console.error('[assignPermissionsToRole] Funções não encontradas:', missingIds);
+        return { 
+          success: false, 
+          message: `Funções com IDs ${missingIds.join(', ')} não foram encontradas no banco de dados. Certifique-se de usar os IDs reais retornados por createFunction.` 
+        };
+      }
+      
+      // Buscar funções existentes da role
+      const existingFunctions = await role.getFunctions();
+      const existingFunctionIds = existingFunctions.map(f => f.id);
+      
+      // Filtrar apenas as novas funções que ainda não estão associadas
+      const newFunctionIds = functionIds.filter(id => !existingFunctionIds.includes(id));
+      
+      // Adicionar apenas as novas funções sem remover as existentes
+      if (newFunctionIds.length > 0) {
+        await role.addFunctions(newFunctionIds);
+        return { 
+          success: true, 
+          message: `${newFunctionIds.length} nova(s) permissão(ões) adicionada(s) à role com sucesso!` 
+        };
+      } else {
+        return { 
+          success: true, 
+          message: `Todas as permissões já estavam associadas à role.` 
+        };
+      }
+    } catch (error) {
+      console.error('[assignPermissionsToRole] Erro:', error);
+      return { success: false, message: `Erro ao executar assignPermissionsToRole: ${error.message}` };
     }
   },
 
   getModels: async () => {
+    const db = getDb();
     const models = await db.sequelize.models;
     const modelList = Object.keys(models).map(key => ({
       name: key,
@@ -1455,6 +1513,8 @@ const availableFunctions = {
 
     try {
       // Buscar do banco de dados primeiro usando o nome normalizado
+      const db = getDb();
+      const { ModelDefinition } = db;
       const modelDef = await ModelDefinition.findOne({ where: { name: normalizedName } });
       
       if (modelDef) {
@@ -1627,21 +1687,44 @@ const availableFunctions = {
   },
 
   getSystems: async () => {
-    const systems = await System.findAll({ attributes: ['id', 'name', 'sigla'] });
-    return { success: true, data: systems, message: 'Sistemas listados com sucesso' };
+    try {
+      const db = getDb();
+      const { System } = db;
+      const systems = await System.findAll({ attributes: ['id', 'name', 'sigla'] });
+      return { success: true, data: systems, message: 'Sistemas listados com sucesso' };
+    } catch (error) {
+      console.error('[getSystems] Erro:', error);
+      return { success: false, message: `Erro ao listar sistemas: ${error.message}` };
+    }
   },
 
   getRoles: async (params) => {
-    const { id_system } = params || {};
-    const where = id_system ? { id_system } : {};
-    const roles = await Role.findAll({ where, attributes: ['id', 'name', 'id_system'] });
-    return { success: true, data: roles, message: 'Roles listadas com sucesso' };
+    try {
+      const db = getDb();
+      const { Role } = db;
+      const { id_system } = params || {};
+      const where = id_system ? { id_system } : {};
+      const roles = await Role.findAll({ where, attributes: ['id', 'name', 'id_system'] });
+      return { success: true, data: roles, message: 'Roles listadas com sucesso' };
+    } catch (error) {
+      console.error('[getRoles] Erro:', error);
+      return { success: false, message: `Erro ao listar roles: ${error.message}` };
+    }
   },
 
   createModule: async (params) => {
     try {
       const moduleController = require('./moduleController');
       const result = await moduleController.createModuleInternal(params);
+      
+      // Limpar cache do moduleLoader para garantir que o módulo recém-criado seja detectado
+      try {
+        const moduleLoaderPath = require.resolve('../utils/moduleLoader');
+        delete require.cache[moduleLoaderPath];
+        console.log('[createModule] Cache do moduleLoader limpo para detectar módulo recém-criado');
+      } catch (cacheError) {
+        console.warn('[createModule] Não foi possível limpar cache do moduleLoader:', cacheError.message);
+      }
       
       return { 
         success: true, 
@@ -1687,11 +1770,8 @@ const availableFunctions = {
     // Se módulo especificado, verificar se existe ou criar
     let targetModule = module;
     if (module) {
-      const { loadModules } = require('../utils/moduleLoader');
-      const modules = loadModules();
-      const moduleExists = modules.find(m => m.name === module && m.enabled);
-      
-      if (!moduleExists) {
+      // Verificar se o módulo existe (na pasta ou no moduleLoader)
+      if (!moduleExists(module)) {
         // Tentar criar o módulo automaticamente
         const createModuleResult = await availableFunctions.createModule({
           name: module,
@@ -1705,6 +1785,14 @@ const availableFunctions = {
           return { 
             success: false, 
             message: `Módulo "${module}" não existe e não foi possível criá-lo: ${createModuleResult.message}` 
+          };
+        }
+        
+        // Após criar, verificar novamente se o módulo existe
+        if (!moduleExists(module)) {
+          return { 
+            success: false, 
+            message: `Módulo "${module}" foi criado mas não foi detectado. Tente novamente.` 
           };
         }
       }
@@ -1817,6 +1905,8 @@ const availableFunctions = {
     
     // Salvar definição no banco de dados
     try {
+      const db = getDb();
+      const { ModelDefinition } = db;
       await ModelDefinition.upsert({
         name: name,
         className: className,
@@ -2033,6 +2123,8 @@ const availableFunctions = {
     
     try {
       // Tentar buscar do banco primeiro
+      const db = getDb();
+      const { ModelDefinition } = db;
       const modelDef = await ModelDefinition.findOne({ where: { name: normalizedName } });
       if (modelDef && modelDef.definition) {
         existingFields = modelDef.definition.fields || [];
@@ -2165,6 +2257,8 @@ const availableFunctions = {
     
     // Atualizar definição no banco de dados (usar normalizedName e dados mesclados)
     try {
+      const db = getDb();
+      const { ModelDefinition } = db;
       await ModelDefinition.upsert({
         name: normalizedName,
         className: className,
@@ -2219,6 +2313,8 @@ const availableFunctions = {
     
     // Excluir definição do banco de dados
     try {
+      const db = getDb();
+      const { ModelDefinition } = db;
       await ModelDefinition.destroy({ where: { name } });
     } catch (dbError) {
       console.error('Erro ao excluir definição do banco:', dbError);
