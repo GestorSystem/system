@@ -390,14 +390,26 @@ function stopImpersonating() {
 
 async function fetchMenus() {
   try {
+    const token = localStorage.getItem('token');
+    console.log('📋 fetchMenus - Token no localStorage:', token ? `${token.substring(0, 20)}...` : 'NÃO ENCONTRADO');
+    
     const params = {
       systemId: authStore.system?.id,
       id_organization: authStore.currentOrganization?.id
     };
+    console.log('📋 fetchMenus - Parâmetros:', params);
+    
     const response = await api.get('/api/menus/user', { params });
+    console.log('✅ fetchMenus - Resposta recebida:', response.data);
     dynamicMenus.value = response.data || [];
   } catch (error) {
-    console.error('Erro ao carregar menus:', error);
+    console.error('❌ Erro ao carregar menus:', error);
+    console.error('❌ Detalhes do erro:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      headers: error.config?.headers
+    });
     // Não mostrar erro ao usuário, apenas logar
   }
 }

@@ -46,10 +46,12 @@ import { ref, onMounted, computed } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRouter, useRoute } from 'vue-router';
 import { api } from '../boot/axios'; // Import the configured axios instance
+import { useAuthStore } from '../stores/auth'; // Import store estático (Pinia já está inicializado nos boot files)
 
 const $q = useQuasar();
 const router = useRouter();
 const route = useRoute();
+const authStore = useAuthStore(); // Inicializar store (Pinia já está disponível)
 
 const email = ref('');
 const password = ref('');
@@ -90,9 +92,6 @@ onMounted(() => {
 
 const onSubmit = async () => {
   try {
-    const { useAuthStore } = await import('../stores/auth');
-    const authStore = useAuthStore();
-    
     await authStore.login(email.value, password.value);
     
     $q.notify({
@@ -102,10 +101,10 @@ const onSubmit = async () => {
     });
     router.push('/'); // Redirect to home page (root authenticated)
   } catch (error) {
-    console.log(error);
+    console.error('Erro no login:', error);
     $q.notify({
       color: 'negative',
-      message: error.response?.data?.message || 'An error occurred during login',
+      message: error.response?.data?.message || error.message || 'An error occurred during login',
       icon: 'warning'
     });
   }

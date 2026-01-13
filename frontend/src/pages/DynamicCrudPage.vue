@@ -185,7 +185,7 @@ async function loadCrudConfig(crudName) {
           const componentMap = {
             // Caminho relativo a partir de mod/system/frontend/src/pages/
             // Para mod/chat/frontend/src/Conversations.vue
-            '@gestor/chat/frontend/src/Conversations.vue': () => import(/* @vite-ignore */ '../../../../chat/frontend/src/Conversations.vue')
+            // '@gestor/chat/frontend/src/Conversations.vue': () => import(/* @vite-ignore */ '../../../../chat/frontend/src/Conversations.vue')
           };
           
           // Verificar se o componente está no mapeamento

@@ -7,6 +7,25 @@ const api = axios.create({
   baseURL: 'http://localhost:3000', // Your backend API base URL
 });
 
+// Configurar interceptor de request ANTES do boot (para garantir que funcione imediatamente)
+api.interceptors.request.use((config) => {
+  try {
+    const token = localStorage.getItem('token'); // Get token directly from localStorage
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+      console.log('🔐 Token adicionado ao header Authorization');
+    } else {
+      console.warn('⚠️  Token não encontrado no localStorage');
+    }
+  } catch (error) {
+    console.error('❌ Erro ao acessar localStorage no interceptor:', error);
+  }
+  return config;
+}, (error) => {
+  console.error('❌ Erro no interceptor de request:', error);
+  return Promise.reject(error);
+});
+
 export default boot(({ app, router }) => {
   // for use inside Vue files (Options API) through this.$axios and this.$api
   app.config.globalProperties.$axios = axios;
@@ -16,14 +35,6 @@ export default boot(({ app, router }) => {
   app.config.globalProperties.$api = api;
   // ^ ^ ^ this will allow you to use this.$api (for Vue Options API form)
   //       then you can easily perform requests: this.$api.get('/users')
-
-  api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token'); // Get token directly from localStorage
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  });
 
   api.interceptors.response.use(
     (response) => {
